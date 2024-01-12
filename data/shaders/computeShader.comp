@@ -1,0 +1,78 @@
+#version 430 core
+
+struct Particle {
+	vec4 posAndSize;    // posX, posY, posZ, size
+	vec4 velAndMass;    // velX, velY, velZ, mass
+	vec4 accel;         // accX, accY, accZ, blank
+};
+
+layout(std430, binding = 2) buffer pBuffer 
+{
+    Particle particles[];    
+} input_data;
+
+uniform float dt;
+uniform int X_BOUNDS;
+uniform int Y_BOUNDS;
+uniform int Z_BOUNDS;
+
+layout (local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
+
+void updatePos(uint pIdx, int xBounds, int yBounds, int zBounds);
+
+void main()
+{
+    uint pIdx = gl_GlobalInvocationID.x;
+   
+    // Update particle velocity
+    updatePos(pIdx, X_BOUNDS, Y_BOUNDS, Z_BOUNDS);
+
+    // Interesting function
+    //barrier();  //Ensures sync between work groups
+}
+
+// Bounds checking and velocity update
+void updatePos(uint pIdx, int xBounds, int yBounds, int zBounds) 
+{
+    vec3 pos = input_data.particles[pIdx].posAndSize.xyz;
+    vec3 acc = input_data.particles[pIdx].accel.xyz;
+    vec3 vel = input_data.particles[pIdx].velAndMass.xyz + (acc * dt);
+    float pSize = input_data.particles[pIdx].posAndSize.w;
+
+    // F = ma
+    // vel = v + (a*t);
+    vec3 newPos = pos + (vel * dt);
+
+    // Dampening settings and particle size
+    vec3 bounds = vec3(xBounds, yBounds, zBounds);
+    vec3 reflectMult = vec3(0.95f, 0.95f, 0.95f);
+
+    // TODO: Look into reflect()
+    // Check bounds and reflect particle velocities
+    for ( int i = 0; i < 3; ++i) {
+        if (newPos[i] - pSize <= -bounds[i]) {
+            newPos[i] = -bounds[i] + pSize;
+            vel[i] *= -reflectMult[i];
+        } else if (newPos[i] + pSize >= bounds[i]) {
+            newPos[i] = bounds[i] - pSize;
+            vel[i] *= -reflectMult[i];
+        }
+    }
+
+    // Change the xyz of particle vel and pos
+    input_data.particles[pIdx].posAndSize.xyz = newPos;
+    input_data.particles[pIdx].velAndMass.xyz = vel;
+}
+
+
+/*
+    // Important built ins:
+    (all uvec3 except gl_LocalInvocationIndex)
+    gl_NumWorkGroups	
+    gl_WorkGroupSize
+    gl_WorkGroupID
+    gl_LocalInvocationID
+    gl_GlobalInvocationID   //(gl_WorkGroupID * gl_WorkGroupSize + gl_LocalInvocationID)
+    gl_LocalInvoationIndex  //(gl_LocalInvocationID.z * gl_WorkGroupSize.x * gl_WorkGroupSize.y + 
+                               gl_LocalInvocationID.y * gl_WorkGroupSize.x + gl_LocalInvocationID.x)   
+*/
